@@ -1,0 +1,1 @@
+sessionStorage.setItem("id_token", sessionStorage.getItem("id_token").split(".")[0] + "." + btoa(JSON.stringify({exp: 0})) + ".fake");
