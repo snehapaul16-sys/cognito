@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Authenticated Site</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>My Website</h1>
+    </header>
+
+    <main>
+        <div id="logged-out">
+            <h2>Welcome, visitor!</h2>
+            <p>Sign in to access exclusive members-only content.</p>
+            <a id="sign-in-btn" class="btn" href="#">Sign In</a>
+        </div>
+
+        <div id="logged-in" style="display: none;">
+            <h2 id="welcome-msg">Welcome!</h2>
+            <div id="members-content"></div>
+			<div id="profile-card"></div>
+            <button id="sign-out-btn" class="btn" onclick="signOut()">Sign Out</button>
+        </div>
+		<div id="session-expired" style="display: none;">
+			<h2>Session Expired</h2>
+			<p>Your session has expired. Please sign in again.</p>
+			<a id="sign-in-again-btn" class="btn" href="#">Sign In Again</a>
+		</div>
+    </main>
+    <script>
+	    // === CONFIGURATION ===
+        // Replace these values with your own after completing Steps 1-2
+        var cognitoDomain = "https://us-east-1fgpniqlrv.auth.us-east-1.amazoncognito.com";
+        var clientId = "4t1ou2lu3jv0odrse2tah7pm0n";
+        var redirectUri = "https://dzn1p1ryczg3r.cloudfront.net";
+
+        // === SET LOGIN LINKS===
+        var loginUrl = cognitoDomain + "/oauth2/authorize?response_type=token&client_id=" + clientId + "&redirect_uri=" + encodeURIComponent(redirectUri) + "&scope=openid+profile+email";
+        document.getElementById("sign-in-btn").href = loginUrl;
+		document.getElementById("sign-in-again-btn").href = loginUrl;
+		
+		// === JWT PARSER ===
+		function parseJwt(token) {
+		try {
+			var base64Url = token.split('.')[1];
+			var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+			var jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+			}).join(''));
+        return JSON.parse(jsonPayload);
+		} catch (e) {
+        return null;
+		}
+		}
+
+		// === TOKEN EXTRACTION ===
+		function getTokenFromUrl() {
+		var hash = window.location.hash.substring(1);
+		var params = {};
+		hash.split('&').forEach(function(part) {
+        var pair = part.split('=');
+        params[pair[0]] = decodeURIComponent(pair[1]);
+		});
+		return params.id_token || null;
+		}
+		// === SIGN OUT ===
+		function signOut() {
+		sessionStorage.removeItem("id_token");
+		var logoutUrl = cognitoDomain + "/logout?client_id=" + clientId + "&logout_uri=" + encodeURIComponent(redirectUri);
+		window.location.href = logoutUrl;
+		}
+		// === FORMAT CLAIM VALUES ===
+		function formatClaimValue(key, value) {
+			if ((key === "iat" || key === "exp" || key === "auth_time") && typeof value === "number") {
+			return new Date(value * 1000).toLocaleString();
+			}
+			return String(value);
+		}
+		// === CLAIM LABELS ===
+		function getClaimLabel(key) {
+		var labels = {
+        "sub": "User ID",
+        "email": "Email",
+        "email_verified": "Email Verified",
+        "iss": "Issuer",
+        "aud": "Audience (Client ID)",
+        "token_use": "Token Use",
+        "auth_time": "Authenticated At",
+        "iat": "Issued At",
+        "exp": "Expires At"
+		};
+		return labels[key] || key;
+		}
+		// === BUILD PROFILE CARD ===
+		function buildProfileCard(payload) {
+		var card = document.getElementById("profile-card");
+		var html = "<h3>Your Identity Token Claims</h3><div class=\"claims-list\">";
+		var keys = Object.keys(payload);
+		for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        html += "<div class=\"claim-row\">";
+        html += "<span class=\"claim-label\">" + getClaimLabel(key) + "</span>";
+        html += "<span class=\"claim-value\">" + formatClaimValue(key, payload[key]) + "</span>";
+        html += "</div>";
+		}
+		html += "</div>";
+		card.innerHTML = html;
+		}
+		function showLoggedOut() {
+		document.getElementById("logged-out").style.display = "block";
+		document.getElementById("logged-in").style.display = "none";
+		document.getElementById("session-expired").style.display = "none";
+		}
+		function showExpired() {
+		sessionStorage.removeItem("id_token");
+		document.getElementById("logged-out").style.display = "none";
+		document.getElementById("logged-in").style.display = "none";
+		document.getElementById("session-expired").style.display = "block";
+		}
+		// === EXPIRATION CHECKER ===
+		function checkExpiration() {
+		var storedToken = sessionStorage.getItem("id_token");
+		if (storedToken) {
+        var payload = parseJwt(storedToken);
+        if (payload && payload.exp && (payload.exp * 1000 <= Date.now())) {
+            showExpired();
+        }
+		}
+		}
+				// === MAIN LOGIC ===
+		function showLoggedIn(payload) {
+		document.getElementById("logged-out").style.display = "none";
+		document.getElementById("session-expired").style.display = "none";
+		document.getElementById("logged-in").style.display = "block";
+		document.getElementById("welcome-msg").textContent = "Welcome, " + payload.email + "!";
+
+		var membersDiv = document.getElementById("members-content");
+		membersDiv.innerHTML = "<h3>Members Only</h3><p>You are seeing this because you are authenticated. Your user ID is: " + payload.sub + "</p>";
+		buildProfileCard(payload);
+		}
+		
+		// Check for token in URL (redirect from Cognito)
+		var token = getTokenFromUrl();
+		if (token) {
+		sessionStorage.setItem("id_token", token);
+		history.replaceState(null, "", window.location.pathname);
+		} else {
+		token = sessionStorage.getItem("id_token");
+		}
+
+		if (token) {
+		var payload = parseJwt(token);
+		if (payload && payload.exp && (payload.exp * 1000 > Date.now())) {
+        showLoggedIn(payload);
+		        } else {
+            showExpired();
+        }
+		} else {
+		showLoggedOut();
+		}
+		// Check expiration every 60 seconds
+		setInterval(checkExpiration, 60000);
+	</script>
+</body>
+</html>
